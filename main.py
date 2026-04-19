@@ -17,7 +17,6 @@ from stream.ffmpeg_streamer import FFmpegStreamer
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 log = logging.getLogger(__name__)
 
-# Shared state (written by background threads, read by frame loop)
 _state = {
     "chart_img": None,
     "price": 0.0,
@@ -25,10 +24,21 @@ _state = {
     "df": None,
 }
 _news_queue: list[str] = []
+_streamer: FFmpegStreamer | None = None
+
+
+def _speak(text: str):
+    """Synthesize text and play into the live stream (non-blocking)."""
+    global _streamer
+    try:
+        wav = synthesize(text)
+        if _streamer and _streamer.alive:
+            _streamer.play_audio(wav)
+    except Exception as e:
+        log.warning("TTS error: %s", e)
 
 
 def _refresh_chart():
-    """Background thread: refresh chart every CHART_REFRESH_SEC."""
     while True:
         try:
             df = fetch_ohlcv()
@@ -37,18 +47,13 @@ def _refresh_chart():
             narration = build_chart_narration(df, price)
             _state.update({"chart_img": img, "price": price, "subtitle": narration, "df": df})
             log.info("Chart refreshed. Price: ¥%.2f", price)
-            # TTS in background (fire-and-forget; audio not yet piped to stream)
-            try:
-                synthesize(narration)
-            except Exception as e:
-                log.warning("TTS failed: %s", e)
+            threading.Thread(target=_speak, args=(narration,), daemon=True).start()
         except Exception as e:
             log.error("Chart refresh error: %s", e)
         time.sleep(CHART_REFRESH_SEC)
 
 
 def _refresh_news():
-    """Background thread: fetch news every NEWS_INTERVAL_SEC."""
     while True:
         try:
             headlines = fetch_latest_news()
@@ -60,29 +65,28 @@ def _refresh_news():
 
 
 def _run_stream():
-    streamer = FFmpegStreamer()
-    streamer.start()
+    global _streamer
+    _streamer = FFmpegStreamer()
+    _streamer.start()
     log.info("Stream started.")
 
     frame_interval = 1.0 / FPS
     last_news_time = time.time()
 
     while True:
-        if not streamer.alive:
+        if not _streamer.alive:
             log.warning("FFmpeg died — restarting stream...")
-            streamer.stop()
+            _streamer.stop()
             time.sleep(3)
-            streamer.start()
+            _streamer.start()
 
-        # Switch subtitle to news periodically
+        # Inject news periodically
         if _news_queue and (time.time() - last_news_time) >= NEWS_INTERVAL_SEC:
             headline = _news_queue.pop(0)
-            _state["subtitle"] = build_news_narration(headline)
+            text = build_news_narration(headline)
+            _state["subtitle"] = text
             last_news_time = time.time()
-            try:
-                synthesize(_state["subtitle"])
-            except Exception:
-                pass
+            threading.Thread(target=_speak, args=(text,), daemon=True).start()
 
         chart_img = _state.get("chart_img")
         if chart_img is None:
@@ -90,12 +94,11 @@ def _run_stream():
             continue
 
         frame = compose_frame(chart_img, _state["price"], _state["subtitle"])
-        streamer.send_frame(frame)
+        _streamer.send_frame(frame)
         time.sleep(frame_interval)
 
 
 def main():
-    # Initial data load before starting stream
     log.info("Loading initial data...")
     try:
         df = fetch_ohlcv()
@@ -106,16 +109,16 @@ def main():
     except Exception as e:
         log.error("Initial load failed: %s", e)
 
-    # Start background threads
     threading.Thread(target=_refresh_chart, daemon=True).start()
     threading.Thread(target=_refresh_news, daemon=True).start()
 
-    # Stream loop with top-level auto-recovery
     while True:
         try:
             _run_stream()
         except KeyboardInterrupt:
             log.info("Stopped by user.")
+            if _streamer:
+                _streamer.stop()
             break
         except Exception as e:
             log.error("Stream crashed: %s — restarting in 10s", e)
