@@ -56,7 +56,7 @@ YOUTUBE_STREAM_KEY = os.getenv("YOUTUBE_STREAM_KEY", "")
 # --- Video ---
 WIDTH = int(os.getenv("WIDTH", "1280"))
 HEIGHT = int(os.getenv("HEIGHT", "720"))
-FPS = int(os.getenv("FPS", "30"))
+FPS = int(os.getenv("FPS", "24"))
 
 # --- Timing (seconds) ---
 CHART_REFRESH_SEC = int(os.getenv("CHART_REFRESH_SEC", "60"))

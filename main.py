@@ -134,6 +134,7 @@ def _run_stream():
     last_news_time = time.time()
     last_composed_frame = None
     last_compose_time = 0
+    next_frame_time = time.time()  # Track when next frame should be submitted
 
     while True:
         if not _streamer.alive:
@@ -141,6 +142,7 @@ def _run_stream():
             _streamer.stop()
             time.sleep(3)
             _streamer.start()
+            next_frame_time = time.time()  # Reset timing
 
         # Inject news periodically
         if _news_queue and (time.time() - last_news_time) >= NEWS_INTERVAL_SEC:
@@ -153,7 +155,8 @@ def _run_stream():
 
         chart_img = _state.get("chart_img")
         if chart_img is None:
-            time.sleep(1)
+            time.sleep(0.5)
+            next_frame_time = time.time()  # Reset timing
             continue
 
         # Only re-compose the frame every 0.5 seconds or when state changes,
@@ -171,7 +174,14 @@ def _run_stream():
 
         if last_composed_frame:
             _streamer.send_frame(last_composed_frame)
-        time.sleep(frame_interval)
+
+        # Clock-based frame timing: sleep only until next frame is due
+        # This ensures consistent FPS regardless of how long operations took
+        now = time.time()
+        sleep_time = next_frame_time - now
+        if sleep_time > 0:
+            time.sleep(sleep_time)
+        next_frame_time += frame_interval
 
 
 def main():

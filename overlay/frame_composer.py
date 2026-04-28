@@ -4,7 +4,7 @@ from .font_manager import get_font
 import datetime
 
 _FONT_SIZE_LARGE = 36
-_FONT_SIZE_SMALL = 24
+_FONT_SIZE_SMALL = 18
 
 
 def _font(size: int):
@@ -42,11 +42,11 @@ def compose_frame(chart_img: Image.Image, symbol: str, price: float, change_pct:
     draw.rectangle([0, 0, WIDTH, 58], fill=(0, 0, 0, 200))
     draw.text((12, 7), top_text, font=_font(_FONT_SIZE_LARGE), fill=(255, 220, 0))
 
-    # Bottom: subtitle / narration telop
+    # Bottom: subtitle / narration telop (shorter height to avoid covering chart candlesticks)
     if subtitle:
         subtitle_font = _font(_FONT_SIZE_SMALL)
         wrapped = _wrap_text(draw, subtitle, subtitle_font, WIDTH - 28)
-        draw.rectangle([0, HEIGHT - 92, WIDTH, HEIGHT], fill=(0, 0, 0, 210))
-        draw.multiline_text((14, HEIGHT - 82), wrapped, font=subtitle_font, fill=(255, 255, 255), spacing=4)
+        draw.rectangle([0, HEIGHT - 50, WIDTH, HEIGHT], fill=(0, 0, 0, 210))
+        draw.multiline_text((14, HEIGHT - 45), wrapped, font=subtitle_font, fill=(255, 255, 255), spacing=3)
 
     return frame
