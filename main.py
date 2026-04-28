@@ -19,6 +19,7 @@ from data.price_fetcher import fetch_ohlcv_by_source, fetch_current_price_by_sou
 from data.news_fetcher import fetch_latest_news
 from chart.chart_renderer import render_chart
 from overlay.frame_composer import compose_frame
+from overlay.font_manager import ensure_fonts_cached
 from audio.narrator import build_chart_narration, build_news_narration, calc_change_pct
 from audio.tts import synthesize
 from stream.ffmpeg_streamer import FFmpegStreamer
@@ -164,6 +165,9 @@ def _run_stream():
 
 
 def main():
+    log.info("Ensuring fonts are cached...")
+    ensure_fonts_cached()
+    
     log.info("Loading initial data...")
     try:
         target = _next_symbol()

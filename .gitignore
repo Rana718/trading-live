@@ -11,3 +11,8 @@ wheels/
 
 # Environment
 .env
+
+# Fonts (auto-downloaded, large files)
+fonts/*.ttc
+fonts/*.ttf
+!fonts/README.md
