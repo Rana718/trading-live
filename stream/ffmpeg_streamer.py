@@ -129,7 +129,7 @@ class FFmpegStreamer:
     def send_frame(self, img: Image.Image):
         if self._proc and self._proc.stdin:
             try:
-                self._proc.stdin.write(np.array(img.resize((WIDTH, HEIGHT))).tobytes())
+                self._proc.stdin.write(np.array(img).tobytes())
                 self._proc.stdin.flush()
             except BrokenPipeError:
                 pass

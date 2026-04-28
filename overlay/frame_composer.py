@@ -32,7 +32,7 @@ def _wrap_text(draw: ImageDraw.ImageDraw, text: str, font, max_width: int) -> st
 def compose_frame(chart_img: Image.Image, symbol: str, price: float, change_pct: float, subtitle: str) -> Image.Image:
     """Overlay price telop + subtitle onto chart image, return final frame."""
     now_dt = datetime.datetime.now()
-    frame = chart_img.resize((WIDTH, HEIGHT))
+    frame = chart_img  # Chart already sized to exact WIDTH x HEIGHT
     draw = ImageDraw.Draw(frame)
 
     # Top-left: symbol + price (with second-level timestamp for some motion)
@@ -42,11 +42,11 @@ def compose_frame(chart_img: Image.Image, symbol: str, price: float, change_pct:
     draw.rectangle([0, 0, WIDTH, 58], fill=(0, 0, 0, 200))
     draw.text((12, 7), top_text, font=_font(_FONT_SIZE_LARGE), fill=(255, 220, 0))
 
-    # Bottom: subtitle / narration telop (shorter height to avoid covering chart candlesticks)
+    # Bottom: subtitle / narration telop (full width, increased height for better readability)
     if subtitle:
         subtitle_font = _font(_FONT_SIZE_SMALL)
         wrapped = _wrap_text(draw, subtitle, subtitle_font, WIDTH - 28)
-        draw.rectangle([0, HEIGHT - 50, WIDTH, HEIGHT], fill=(0, 0, 0, 210))
-        draw.multiline_text((14, HEIGHT - 45), wrapped, font=subtitle_font, fill=(255, 255, 255), spacing=3)
+        draw.rectangle([0, HEIGHT - 60, WIDTH, HEIGHT], fill=(0, 0, 0, 210))
+        draw.multiline_text((14, HEIGHT - 52), wrapped, font=subtitle_font, fill=(255, 255, 255), spacing=3)
 
     return frame
