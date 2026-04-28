@@ -7,7 +7,7 @@
 - 複数銘柄の自動切り替え配信
 - `coingecko` / `mt5` のチャートソース切替
 - ローソク足 + 移動平均線 + ボリンジャーバンド表示
-- VOICEVOXによるチャート/ニュース読み上げ
+- Edge TTSによるチャート/ニュース読み上げ
 - 価格・変動率・字幕テロップ表示
 - FFmpegによるRTMP自動配信とプロセス再起動
 
@@ -17,7 +17,7 @@
 
 - Python 3.11+
 - FFmpeg (`sudo apt install ffmpeg` or Windows installer)
-- [VOICEVOX](https://voicevox.hiroshiba.jp/) — ローカルで起動しておく
+- Edge TTS（Pythonライブラリ）
 
 ### インストール
 
@@ -34,7 +34,10 @@ uv sync
 | `MT5_TIMEFRAME`         | MT5利用時の時間足（`M1`, `M5`, `H1` など）            |
 | `MT5_BARS`              | MT5利用時の取得本数                                   |
 | `SYMBOL_ROTATE_SEC`     | 銘柄切替間隔（秒）                                   |
-| `VOICEVOX_SPEAKER`      | VOICEVOXの話者ID                                     |
+| `TTS_ENGINE`            | `edge` を推奨                                        |
+| `EDGE_TTS_VOICE`        | Edge TTSの音声名                                     |
+| `EDGE_TTS_RATE`         | 読み上げ速度                                          |
+| `EDGE_TTS_VOLUME`       | 音量                                                 |
 | `YOUTUBE_STREAM_KEY`    | YouTubeのストリームキー ← **必ず設定**               |
 | `CHART_REFRESH_SEC`     | チャート更新間隔（秒）                               |
 | `NEWS_INTERVAL_SEC`     | ニュース読み上げ間隔（秒）                           |
@@ -67,7 +70,6 @@ uv sync
 ### 起動
 
 ```bash
-# VOICEVOXを先に起動してから:
 uv run python main.py
 ```
 
@@ -108,7 +110,7 @@ chart/
 overlay/
   frame_composer.py # テロップ合成（銘柄/価格/変動率/字幕）
 audio/
-  tts.py           # VOICEVOX TTS
+  tts.py           # Edge TTS
   narrator.py      # ナレーション文生成
 stream/
   ffmpeg_streamer.py # FFmpeg → YouTube RTMP

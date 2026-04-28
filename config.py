@@ -43,9 +43,11 @@ NEWS_SOURCES = _runtime.get("news_sources", [
     {"type": "rss", "url": "https://decrypt.co/feed"},
 ])
 
-# --- VOICEVOX ---
-VOICEVOX_URL = os.getenv("VOICEVOX_URL", "http://127.0.0.1:50021")
-VOICEVOX_SPEAKER = int(os.getenv("VOICEVOX_SPEAKER", "1"))
+# --- TTS ---
+TTS_ENGINE = os.getenv("TTS_ENGINE", "edge").strip().lower()
+EDGE_TTS_VOICE = os.getenv("EDGE_TTS_VOICE", "ja-JP-NanamiNeural").strip()
+EDGE_TTS_RATE = os.getenv("EDGE_TTS_RATE", "+0%").strip()
+EDGE_TTS_VOLUME = os.getenv("EDGE_TTS_VOLUME", "+0%").strip()
 
 # --- Stream ---
 YOUTUBE_RTMP_URL = "rtmp://a.rtmp.youtube.com/live2"

@@ -59,9 +59,10 @@
 
 `.env` を編集:
 
-- `VOICEVOX_SPEAKER`: 話者ID
-- `SYMBOL_ROTATE_SEC`: 銘柄切替間隔（秒）
-- `NEWS_INTERVAL_SEC`: ニュース読み上げ間隔（秒）
+- `TTS_ENGINE`: `edge`
+- `EDGE_TTS_VOICE`: 音声名（例: `ja-JP-NanamiNeural`）
+- `EDGE_TTS_RATE`: 読み上げ速度
+- `EDGE_TTS_VOLUME`: 音量
 
 ## 5. 反映方法
 

@@ -1,38 +1,56 @@
-import requests
+import asyncio
+import os
+import subprocess
+import tempfile
 import time
-import io
-from requests.exceptions import RequestException
-from config import VOICEVOX_URL, VOICEVOX_SPEAKER
+
+from edge_tts import Communicate
+
+from config import EDGE_TTS_RATE, EDGE_TTS_VOLUME, EDGE_TTS_VOICE, TTS_ENGINE
+
+
+def _edge_tts_to_wav(text: str) -> bytes:
+    async def _synthesize() -> bytes:
+        with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as mp3_file:
+            mp3_path = mp3_file.name
+
+        try:
+            await Communicate(
+                text=text,
+                voice=EDGE_TTS_VOICE,
+                rate=EDGE_TTS_RATE,
+                volume=EDGE_TTS_VOLUME,
+            ).save(mp3_path)
+
+            result = subprocess.run(
+                ["ffmpeg", "-y", "-i", mp3_path, "-f", "wav", "pipe:1"],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                check=True,
+            )
+            return result.stdout
+        finally:
+            try:
+                os.remove(mp3_path)
+            except OSError:
+                pass
+
+    return asyncio.run(_synthesize())
 
 
 def synthesize(text: str, retries: int = 3, backoff: float = 0.5) -> bytes:
-    """Call VOICEVOX and return WAV audio bytes.
+    """Generate WAV audio bytes using Edge TTS.
 
-    If VOICEVOX is unreachable, retry a few times then return empty bytes as a safe fallback.
+    If Edge TTS is unreachable, retry a few times then return empty bytes as a safe fallback.
     """
+    if TTS_ENGINE != "edge":
+        return b""
+
     for attempt in range(1, retries + 1):
         try:
-            # Step 1: create audio query
-            query_resp = requests.post(
-                f"{VOICEVOX_URL}/audio_query",
-                params={"text": text, "speaker": VOICEVOX_SPEAKER},
-                timeout=15,
-            )
-            query_resp.raise_for_status()
-
-            # Step 2: synthesize
-            synth_resp = requests.post(
-                f"{VOICEVOX_URL}/synthesis",
-                params={"speaker": VOICEVOX_SPEAKER},
-                json=query_resp.json(),
-                timeout=30,
-            )
-            synth_resp.raise_for_status()
-            return synth_resp.content  # WAV bytes
-
-        except RequestException:
+            return _edge_tts_to_wav(text)
+        except Exception:
             if attempt < retries:
                 time.sleep(backoff * attempt)
                 continue
-            # Final fallback: return empty bytes so caller can proceed without audio
             return b""
