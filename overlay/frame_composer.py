@@ -31,11 +31,12 @@ def _wrap_text(draw: ImageDraw.ImageDraw, text: str, font, max_width: int) -> st
 
 def compose_frame(chart_img: Image.Image, symbol: str, price: float, change_pct: float, subtitle: str) -> Image.Image:
     """Overlay price telop + subtitle onto chart image, return final frame."""
-    frame = chart_img.resize((WIDTH, HEIGHT)).copy()
+    now_dt = datetime.datetime.now()
+    frame = chart_img.resize((WIDTH, HEIGHT))
     draw = ImageDraw.Draw(frame)
 
-    # Top-left: symbol + price
-    now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+    # Top-left: symbol + price (with second-level timestamp for some motion)
+    now = now_dt.strftime("%Y-%m-%d %H:%M:%S")
     direction = "+" if change_pct >= 0 else "-"
     top_text = f"{symbol}  ¥{price:,.2f}  |  {direction}{abs(change_pct):.2f}%  |  {now}"
     draw.rectangle([0, 0, WIDTH, 58], fill=(0, 0, 0, 200))

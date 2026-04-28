@@ -132,6 +132,8 @@ def _run_stream():
 
     frame_interval = 1.0 / FPS
     last_news_time = time.time()
+    last_composed_frame = None
+    last_compose_time = 0
 
     while True:
         if not _streamer.alive:
@@ -146,6 +148,7 @@ def _run_stream():
             text = build_news_narration(headline)
             _state["subtitle"] = text
             last_news_time = time.time()
+            last_compose_time = 0  # Force re-compose on next frame
             threading.Thread(target=_speak, args=(text,), daemon=True).start()
 
         chart_img = _state.get("chart_img")
@@ -153,14 +156,21 @@ def _run_stream():
             time.sleep(1)
             continue
 
-        frame = compose_frame(
-            chart_img,
-            _state.get("symbol", "N/A"),
-            _state["price"],
-            _state.get("change_pct", 0.0),
-            _state["subtitle"],
-        )
-        _streamer.send_frame(frame)
+        # Only re-compose the frame every 0.5 seconds or when state changes,
+        # not on every single video frame (huge speedup)
+        now = time.time()
+        if (now - last_compose_time) >= 0.5 or last_composed_frame is None:
+            last_composed_frame = compose_frame(
+                chart_img,
+                _state.get("symbol", "N/A"),
+                _state["price"],
+                _state.get("change_pct", 0.0),
+                _state["subtitle"],
+            )
+            last_compose_time = now
+
+        if last_composed_frame:
+            _streamer.send_frame(last_composed_frame)
         time.sleep(frame_interval)
 
 
