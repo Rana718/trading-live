@@ -1,5 +1,5 @@
 from PIL import Image, ImageDraw, ImageFont
-from config import WIDTH, HEIGHT, COIN_SYMBOL
+from config import WIDTH, HEIGHT
 import datetime
 
 _FONT_SIZE_LARGE = 36
@@ -13,14 +13,15 @@ def _font(size: int):
         return ImageFont.load_default()
 
 
-def compose_frame(chart_img: Image.Image, price: float, subtitle: str) -> Image.Image:
+def compose_frame(chart_img: Image.Image, symbol: str, price: float, change_pct: float, subtitle: str) -> Image.Image:
     """Overlay price telop + subtitle onto chart image, return final frame."""
     frame = chart_img.resize((WIDTH, HEIGHT)).copy()
     draw = ImageDraw.Draw(frame)
 
     # Top-left: symbol + price
     now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
-    top_text = f"{COIN_SYMBOL}  ¥{price:,.2f}  |  {now}"
+    direction = "+" if change_pct >= 0 else "-"
+    top_text = f"{symbol}  ¥{price:,.2f}  |  {direction}{abs(change_pct):.2f}%  |  {now}"
     draw.rectangle([0, 0, WIDTH, 50], fill=(0, 0, 0, 180))
     draw.text((10, 8), top_text, font=_font(_FONT_SIZE_LARGE), fill=(255, 220, 0))
 

@@ -1,17 +1,47 @@
 import os
+import json
 from dotenv import load_dotenv
 
 load_dotenv()
 
-# --- Coin / Symbol ---
-COIN_ID = os.getenv("COIN_ID", "ripple")
-COIN_SYMBOL = os.getenv("COIN_SYMBOL", "XRP/JPY")
 
-# --- News RSS feeds (edit freely) ---
-NEWS_FEEDS = [
-    "https://cointelegraph.com/rss/tag/xrp",
-    "https://decrypt.co/feed",
-]
+def _load_runtime_settings() -> dict:
+    settings_path = os.getenv("RUNTIME_SETTINGS_FILE", "runtime_settings.json")
+    try:
+        with open(settings_path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+
+_runtime = _load_runtime_settings()
+
+# --- Symbols / rotation ---
+SYMBOLS = _runtime.get("symbols", [
+    {
+        "coin_id": os.getenv("COIN_ID", "ripple"),
+        "symbol": os.getenv("COIN_SYMBOL", "XRP/JPY"),
+        "vs_currency": os.getenv("VS_CURRENCY", "jpy"),
+    }
+])
+SYMBOL_ROTATE_SEC = int(os.getenv("SYMBOL_ROTATE_SEC", "300"))
+
+# --- Market data source ---
+# coingecko: CoinGecko API (free, recommended for crypto)
+# binance: Binance REST API (free, real-time, requires API key or public endpoints)
+CHART_SOURCE = os.getenv("CHART_SOURCE", "coingecko").strip().lower()
+BINANCE_API_KEY = os.getenv("BINANCE_API_KEY", "").strip()
+
+# --- TradingView Widget ---
+# Enable TradingView embedded chart for better UX
+USE_TRADINGVIEW_WIDGET = os.getenv("USE_TRADINGVIEW_WIDGET", "true").strip().lower() in ("true", "1", "yes")
+TRADINGVIEW_SYMBOL = os.getenv("TRADINGVIEW_SYMBOL", "CRYPTOCAP:XRP").strip()
+
+# --- News sources (rss/scrape) ---
+NEWS_SOURCES = _runtime.get("news_sources", [
+    {"type": "rss", "url": "https://cointelegraph.com/rss/tag/xrp"},
+    {"type": "rss", "url": "https://decrypt.co/feed"},
+])
 
 # --- VOICEVOX ---
 VOICEVOX_URL = os.getenv("VOICEVOX_URL", "http://127.0.0.1:50021")
@@ -22,9 +52,10 @@ YOUTUBE_RTMP_URL = "rtmp://a.rtmp.youtube.com/live2"
 YOUTUBE_STREAM_KEY = os.getenv("YOUTUBE_STREAM_KEY", "")
 
 # --- Video ---
-WIDTH, HEIGHT = 1280, 720
-FPS = 30
+WIDTH = int(os.getenv("WIDTH", "1280"))
+HEIGHT = int(os.getenv("HEIGHT", "720"))
+FPS = int(os.getenv("FPS", "30"))
 
 # --- Timing (seconds) ---
-CHART_REFRESH_SEC = 60
-NEWS_INTERVAL_SEC = 300
+CHART_REFRESH_SEC = int(os.getenv("CHART_REFRESH_SEC", "60"))
+NEWS_INTERVAL_SEC = int(os.getenv("NEWS_INTERVAL_SEC", "300"))

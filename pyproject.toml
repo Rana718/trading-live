@@ -5,11 +5,19 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.14"
 dependencies = [
+    "beautifulsoup4>=4.13.5",
     "feedparser>=6.0.12",
     "matplotlib>=3.10.8",
     "mplfinance>=0.12.10b0",
     "numpy>=2.4.4",
+    "pandas>=2.3.3",
     "pillow>=12.2.0",
     "python-dotenv>=1.2.2",
     "requests>=2.33.1",
+]
+
+[project.optional-dependencies]
+# MT5 support (deprecated in favor of crypto-native APIs; kept for backward compatibility)
+mt5 = [
+    "MetaTrader5>=5.0.46",
 ]
