@@ -63,7 +63,7 @@ def _speak(text: str):
     global _streamer
     try:
         wav = synthesize(text)
-        if _streamer and _streamer.alive:
+        if wav and _streamer and _streamer.alive:
             _streamer.play_audio(wav)
     except Exception as e:
         log.warning("TTS error: %s", e)
