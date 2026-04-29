@@ -54,9 +54,10 @@ YOUTUBE_RTMP_URL = "rtmp://a.rtmp.youtube.com/live2"
 YOUTUBE_STREAM_KEY = os.getenv("YOUTUBE_STREAM_KEY", "")
 
 # --- Video ---
-WIDTH = int(os.getenv("WIDTH", "1280"))
-HEIGHT = int(os.getenv("HEIGHT", "720"))
-FPS = int(os.getenv("FPS", "24"))
+# 配信の解像度とFPSは固定値にする
+WIDTH = 1280
+HEIGHT = 720
+FPS = 24
 
 # --- Timing (seconds) ---
 CHART_REFRESH_SEC = int(os.getenv("CHART_REFRESH_SEC", "60"))

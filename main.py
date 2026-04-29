@@ -160,7 +160,6 @@ def _run_stream():
             continue
 
         # Only re-compose the frame every 0.5 seconds or when state changes,
-        # not on every single video frame (huge speedup)
         now = time.time()
         if (now - last_compose_time) >= 0.5 or last_composed_frame is None:
             last_composed_frame = compose_frame(
