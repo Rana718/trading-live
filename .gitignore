@@ -12,6 +12,9 @@ wheels/
 # Environment
 .env
 
+# Temp / scratch files
+temp/
+
 # Fonts (auto-downloaded, large files)
 fonts/*.ttc
 fonts/*.ttf
