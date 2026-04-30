@@ -1,5 +1,8 @@
 import io
+import matplotlib
+matplotlib.use("Agg")
 import mplfinance as mpf
+import matplotlib.pyplot as plt
 from PIL import Image
 import pandas as pd
 from config import WIDTH, HEIGHT
@@ -14,7 +17,7 @@ def render_chart(df: pd.DataFrame, title: str) -> Image.Image:
     
     bb = mpf.make_addplot(df["close"].rolling(20).mean() + 2 * df["close"].rolling(20).std(), color="dodgerblue")
     bb_low = mpf.make_addplot(df["close"].rolling(20).mean() - 2 * df["close"].rolling(20).std(), color="dodgerblue")
-    mpf.plot(
+    fig, _ = mpf.plot(
         df,
         type="candle",
         style="charles",
@@ -24,9 +27,11 @@ def render_chart(df: pd.DataFrame, title: str) -> Image.Image:
         volume=False,
         savefig=dict(fname=buf, format="png", dpi=100),
         figsize=(render_width / 100, render_height / 100),
+        returnfig=True,
     )
     buf.seek(0)
     img = Image.open(buf).convert("RGB")
+    plt.close(fig)
     # Resize to exact frame dimensions to fill complete width/height
     img = img.resize((WIDTH, HEIGHT), Image.Resampling.LANCZOS)
     return img

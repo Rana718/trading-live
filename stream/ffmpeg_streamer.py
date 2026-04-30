@@ -2,6 +2,7 @@ import subprocess
 import threading
 import tempfile
 import os
+import platform
 import queue
 import time
 import numpy as np
@@ -13,27 +14,42 @@ class FFmpegStreamer:
     def __init__(self):
         self._proc: subprocess.Popen | None = None
         self._fifo_path: str | None = None
+        self._use_fifo = hasattr(os, "mkfifo") and platform.system().lower() != "windows"
         self._audio_queue: queue.Queue[bytes] = queue.Queue()
         self._audio_writer_stop = threading.Event()
         self._audio_writer_thread: threading.Thread | None = None
         self._ffmpeg_log_thread: threading.Thread | None = None
 
     def start(self):
-        # Create a named FIFO for audio
-        self._fifo_path = tempfile.mktemp(suffix=".pcm.fifo")
-        os.mkfifo(self._fifo_path)
+        audio_input_args: list[str]
 
-        # Start audio writer thread before FFmpeg so FIFO is ready
-        self._audio_writer_stop.clear()
-        self._audio_writer_thread = threading.Thread(target=self._audio_writer_loop, daemon=True)
-        self._audio_writer_thread.start()
+        if self._use_fifo:
+            # Create a named FIFO for audio on POSIX systems.
+            self._fifo_path = tempfile.mktemp(suffix=".pcm.fifo")
+            os.mkfifo(self._fifo_path)
 
-        # Give the writer thread a moment to open the FIFO
-        time.sleep(0.1)
+            # Start audio writer thread before FFmpeg so FIFO is ready.
+            self._audio_writer_stop.clear()
+            self._audio_writer_thread = threading.Thread(target=self._audio_writer_loop, daemon=True)
+            self._audio_writer_thread.start()
+
+            # Give the writer thread a moment to open the FIFO.
+            time.sleep(0.1)
+            audio_input_args = ["-f", "s16le", "-ar", "44100", "-ac", "1", "-i", self._fifo_path]
+        else:
+            # Windows fallback: keep a continuous silent audio source so the stream starts cleanly.
+            # Narration audio requires a separate Windows-specific pipe implementation.
+            self._fifo_path = None
+            self._audio_writer_stop.clear()
+            self._audio_writer_thread = None
+            audio_input_args = [
+                "-f", "lavfi",
+                "-i", "anullsrc=channel_layout=mono:sample_rate=44100",
+            ]
 
         rtmp_target = f"{YOUTUBE_RTMP_URL}/{YOUTUBE_STREAM_KEY}"
 
-        # Main FFmpeg: video from stdin, audio from FIFO
+        # Main FFmpeg: video from stdin, audio from FIFO or silent fallback
         self._proc = subprocess.Popen(
             [
                 "ffmpeg", "-y", "-loglevel", "info",
@@ -41,8 +57,8 @@ class FFmpegStreamer:
                 "-f", "rawvideo", "-vcodec", "rawvideo",
                 "-s", f"{WIDTH}x{HEIGHT}", "-pix_fmt", "rgb24",
                 "-r", str(FPS), "-i", "pipe:0",
-                # audio from fifo (always has silence or narration)
-                "-f", "s16le", "-ar", "44100", "-ac", "1", "-i", self._fifo_path,
+                # audio from fifo (always has silence or narration) or silent fallback on Windows
+                *audio_input_args,
                 # encode
                 "-vcodec", "libx264", "-preset", "veryfast", "-tune", "zerolatency",
                 "-pix_fmt", "yuv420p", "-g", str(FPS * 2),
@@ -136,7 +152,7 @@ class FFmpegStreamer:
 
     def play_audio(self, wav_bytes: bytes):
         """Queue WAV bytes for the persistent PCM writer."""
-        if not self._fifo_path or not wav_bytes:
+        if not self._use_fifo or not self._fifo_path or not wav_bytes:
             return
 
         try:

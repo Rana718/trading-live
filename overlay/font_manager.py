@@ -4,6 +4,7 @@ This avoids any dependency on system font paths and works on Linux and Windows.
 """
 from pathlib import Path
 import shutil
+import ssl
 import urllib.request
 
 from PIL import ImageFont
@@ -29,8 +30,17 @@ def _download_font(url: str, path: Path, timeout: int = 30) -> bool:
         print(f"Font cached at {path}")
         return True
     except Exception as exc:
-        print(f"Failed to download font: {exc}")
-        return False
+        # Some Windows environments have broken CA bundles; retry without certificate verification.
+        try:
+            context = ssl._create_unverified_context()
+            with urllib.request.urlopen(url, timeout=timeout, context=context) as response, path.open("wb") as target:
+                shutil.copyfileobj(response, target)
+            print(f"Font cached at {path} (unverified SSL fallback)")
+            return True
+        except Exception as fallback_exc:
+            print(f"Failed to download font: {exc}")
+            print(f"Failed with SSL fallback too: {fallback_exc}")
+            return False
 
 
 def get_font(size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
