@@ -9,6 +9,58 @@ import numpy as np
 from PIL import Image
 from config import WIDTH, HEIGHT, FPS, YOUTUBE_RTMP_URL, YOUTUBE_STREAM_KEY
 
+MUSIC_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "music.mp3")
+MUSIC_VOLUME = 0.20  # background music at 20% so narration is clearly audible
+_CHUNK = 4410 * 2    # bytes: 0.1s of mono s16le @ 44100Hz (4410 samples × 2 bytes)
+
+
+def _mix_pcm(music_chunk: bytes, voice_chunk: bytes) -> bytes:
+    """Mix music (low volume) + voice (full volume), clamp to s16 range."""
+    music = np.frombuffer(music_chunk, dtype=np.int16).astype(np.float32) * MUSIC_VOLUME
+    voice = np.frombuffer(voice_chunk, dtype=np.int16).astype(np.float32)
+    return np.clip(music + voice, -32768, 32767).astype(np.int16).tobytes()
+
+
+class _MusicReader:
+    """Streams looping music PCM from ffmpeg subprocess, chunk by chunk."""
+
+    def __init__(self):
+        self._proc: subprocess.Popen | None = None
+        self._buf = b""
+
+    def start(self):
+        if not os.path.exists(MUSIC_PATH):
+            print(f"[Music] File not found: {MUSIC_PATH}")
+            return
+        self._proc = subprocess.Popen(
+            ["ffmpeg", "-loglevel", "error",
+             "-stream_loop", "-1", "-i", MUSIC_PATH,
+             "-ac", "1", "-ar", "44100", "-f", "s16le", "pipe:1"],
+            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+        )
+        print("[Music] Background music stream started.")
+
+    def read(self, size: int) -> bytes:
+        """Read exactly `size` bytes of music PCM, blocking as needed."""
+        if not self._proc:
+            return b"\x00" * size
+        while len(self._buf) < size:
+            chunk = self._proc.stdout.read(size - len(self._buf))
+            if not chunk:
+                # ffmpeg ended unexpectedly — restart
+                self.start()
+                if not self._proc:
+                    return b"\x00" * size
+                continue
+            self._buf += chunk
+        out, self._buf = self._buf[:size], self._buf[size:]
+        return out
+
+    def stop(self):
+        if self._proc:
+            self._proc.kill()
+            self._proc = None
+
 
 class FFmpegStreamer:
     def __init__(self):
@@ -19,8 +71,12 @@ class FFmpegStreamer:
         self._audio_writer_stop = threading.Event()
         self._audio_writer_thread: threading.Thread | None = None
         self._ffmpeg_log_thread: threading.Thread | None = None
+        self._music = _MusicReader()
 
     def start(self):
+        # Start looping music stream
+        self._music.start()
+
         audio_input_args: list[str]
 
         if self._use_fifo:
@@ -116,12 +172,12 @@ class FFmpegStreamer:
             return b""
 
     def _audio_writer_loop(self):
-        silence = (b"\x00\x00" * 4410)  # 0.1s of mono 44.1kHz silence
-        
-        # Pre-fill queue with 2 seconds of silence so audio is ready immediately
+        silence = b"\x00\x00" * 4410  # 0.1s of s16le mono silence
+
+        # Pre-fill queue with 2 seconds of silence
         for _ in range(20):
             self._audio_queue.put_nowait(silence)
-        
+
         while not self._audio_writer_stop.is_set():
             if not self._fifo_path:
                 break
@@ -129,15 +185,18 @@ class FFmpegStreamer:
                 with open(self._fifo_path, "wb", buffering=0) as fifo:
                     while not self._audio_writer_stop.is_set() and self._fifo_path:
                         try:
-                            pcm = self._audio_queue.get(timeout=0.1)
+                            voice_pcm = self._audio_queue.get(timeout=0.1)
                         except queue.Empty:
-                            fifo.write(silence)
-                            continue
+                            voice_pcm = silence
 
-                        if pcm:
-                            fifo.write(pcm)
-                        else:
-                            fifo.write(silence)
+                        # Write voice PCM mixed with music in _CHUNK-sized pieces
+                        for offset in range(0, max(len(voice_pcm), _CHUNK), _CHUNK):
+                            v_chunk = voice_pcm[offset:offset + _CHUNK]
+                            # Pad short final chunk with silence
+                            if len(v_chunk) < _CHUNK:
+                                v_chunk = v_chunk + b"\x00" * (_CHUNK - len(v_chunk))
+                            music_chunk = self._music.read(_CHUNK)
+                            fifo.write(_mix_pcm(music_chunk, v_chunk))
             except Exception:
                 if not self._audio_writer_stop.is_set():
                     continue
@@ -163,6 +222,7 @@ class FFmpegStreamer:
 
     def stop(self):
         self._audio_writer_stop.set()
+        self._music.stop()
         if self._proc:
             try:
                 self._proc.stdin.close()

@@ -27,5 +27,10 @@ def build_chart_narration(symbol: str, df: pd.DataFrame, price: float) -> str:
     )
 
 
-def build_news_narration(headline: str) -> str:
-    return f"最新ニュースをお伝えします。{headline}"
+def build_news_narration(headline: str, df: pd.DataFrame | None = None, price: float = 0.0) -> str:
+    base = f"最新ニュースをお伝えします。{headline}"
+    if df is not None and not df.empty and price > 0:
+        chart = build_chart_narration("", df, price)
+        # Strip the symbol prefix ("現在 は") so it flows naturally after the headline
+        return base + "　" + chart
+    return base

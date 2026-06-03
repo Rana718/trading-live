@@ -107,7 +107,6 @@ def _refresh_chart():
                 "df": df,
             })
             log.info("Chart refreshed. %s Price: %.2f", target["symbol"], price)
-            threading.Thread(target=_speak, args=(narration,), daemon=True).start()
         except Exception as e:
             log.error("Chart refresh error: %s", e)
         time.sleep(CHART_REFRESH_SEC)
@@ -131,10 +130,14 @@ def _run_stream():
     log.info("Stream started.")
 
     frame_interval = 1.0 / FPS
-    last_news_time = time.time()
     last_composed_frame = None
     last_compose_time = 0
-    next_frame_time = time.time()  # Track when next frame should be submitted
+    next_frame_time = time.time()
+
+    # Independent timers for speaking — chart analysis every CHART_REFRESH_SEC,
+    # news every NEWS_INTERVAL_SEC. These never block each other.
+    last_chart_speak_time = 0.0
+    last_news_speak_time = 0.0
 
     while True:
         if not _streamer.alive:
@@ -142,24 +145,38 @@ def _run_stream():
             _streamer.stop()
             time.sleep(3)
             _streamer.start()
-            next_frame_time = time.time()  # Reset timing
+            next_frame_time = time.time()
 
-        # Inject news periodically
-        if _news_queue and (time.time() - last_news_time) >= NEWS_INTERVAL_SEC:
+        now = time.time()
+
+        # --- News speak: consume one queued headline when interval elapsed ---
+        if _news_queue and (now - last_news_speak_time) >= NEWS_INTERVAL_SEC:
             headline = _news_queue.pop(0)
-            text = build_news_narration(headline)
+            text = build_news_narration(headline, _state.get("df"), _state.get("price", 0.0))
             _state["subtitle"] = text
-            last_news_time = time.time()
-            last_compose_time = 0  # Force re-compose on next frame
+            last_news_speak_time = now
+            last_chart_speak_time = now  # reset chart timer so they don't overlap
+            last_compose_time = 0
             threading.Thread(target=_speak, args=(text,), daemon=True).start()
+
+        # --- Chart analysis speak: when no news is due and chart interval elapsed ---
+        elif (now - last_chart_speak_time) >= CHART_REFRESH_SEC:
+            df = _state.get("df")
+            price = _state.get("price", 0.0)
+            symbol = _state.get("symbol", "")
+            if df is not None and price > 0 and symbol:
+                text = build_chart_narration(symbol, df, price)
+                _state["subtitle"] = text
+                last_chart_speak_time = now
+                last_compose_time = 0
+                threading.Thread(target=_speak, args=(text,), daemon=True).start()
 
         chart_img = _state.get("chart_img")
         if chart_img is None:
             time.sleep(0.5)
-            next_frame_time = time.time()  # Reset timing
+            next_frame_time = time.time()
             continue
 
-        # Only re-compose the frame every 0.5 seconds or when state changes,
         now = time.time()
         if (now - last_compose_time) >= 0.5 or last_composed_frame is None:
             last_composed_frame = compose_frame(
@@ -174,8 +191,6 @@ def _run_stream():
         if last_composed_frame:
             _streamer.send_frame(last_composed_frame)
 
-        # Clock-based frame timing: sleep only until next frame is due
-        # This ensures consistent FPS regardless of how long operations took
         now = time.time()
         sleep_time = next_frame_time - now
         if sleep_time > 0:
