@@ -10,7 +10,7 @@ from PIL import Image
 from config import WIDTH, HEIGHT, FPS, YOUTUBE_RTMP_URL, YOUTUBE_STREAM_KEY
 
 MUSIC_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "music.mp3")
-MUSIC_VOLUME = 0.20  # background music at 20% so narration is clearly audible
+MUSIC_VOLUME = 0.50  # background music volume
 _CHUNK = 4410 * 2    # bytes: 0.1s of mono s16le @ 44100Hz (4410 samples × 2 bytes)
 
 
@@ -22,41 +22,60 @@ def _mix_pcm(music_chunk: bytes, voice_chunk: bytes) -> bytes:
 
 
 class _MusicReader:
-    """Streams looping music PCM from ffmpeg subprocess, chunk by chunk."""
+    """Streams looping music PCM into an internal queue from a background thread."""
 
     def __init__(self):
         self._proc: subprocess.Popen | None = None
-        self._buf = b""
+        self._buf = bytearray()
+        self._lock = threading.Lock()
+        self._thread: threading.Thread | None = None
+        self._stop = threading.Event()
 
     def start(self):
         if not os.path.exists(MUSIC_PATH):
             print(f"[Music] File not found: {MUSIC_PATH}")
             return
-        self._proc = subprocess.Popen(
-            ["ffmpeg", "-loglevel", "error",
-             "-stream_loop", "-1", "-i", MUSIC_PATH,
-             "-ac", "1", "-ar", "44100", "-f", "s16le", "pipe:1"],
-            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
-        )
+        self._stop.clear()
+        self._thread = threading.Thread(target=self._reader_loop, daemon=True)
+        self._thread.start()
         print("[Music] Background music stream started.")
 
+    def _reader_loop(self):
+        while not self._stop.is_set():
+            try:
+                proc = subprocess.Popen(
+                    ["ffmpeg", "-loglevel", "error",
+                     "-stream_loop", "-1", "-i", MUSIC_PATH,
+                     "-ac", "1", "-ar", "44100", "-f", "s16le", "pipe:1"],
+                    stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                )
+                self._proc = proc
+                while not self._stop.is_set():
+                    chunk = proc.stdout.read(8192)
+                    if not chunk:
+                        break
+                    with self._lock:
+                        self._buf += chunk
+                        # Keep buffer bounded to ~2s (176400 bytes) to avoid unbounded growth
+                        if len(self._buf) > 176400:
+                            del self._buf[:len(self._buf) - 176400]
+                proc.kill()
+            except Exception as e:
+                print(f"[Music] reader error: {e}")
+                time.sleep(1)
+
     def read(self, size: int) -> bytes:
-        """Read exactly `size` bytes of music PCM, blocking as needed."""
-        if not self._proc:
-            return b"\x00" * size
-        while len(self._buf) < size:
-            chunk = self._proc.stdout.read(size - len(self._buf))
-            if not chunk:
-                # ffmpeg ended unexpectedly — restart
-                self.start()
-                if not self._proc:
-                    return b"\x00" * size
-                continue
-            self._buf += chunk
-        out, self._buf = self._buf[:size], self._buf[size:]
-        return out
+        """Return `size` bytes of music PCM; returns silence if buffer not yet filled."""
+        with self._lock:
+            if len(self._buf) >= size:
+                out = bytes(self._buf[:size])
+                del self._buf[:size]
+                return out
+        # Not enough buffered yet — return silence (music will catch up)
+        return b"\x00" * size
 
     def stop(self):
+        self._stop.set()
         if self._proc:
             self._proc.kill()
             self._proc = None

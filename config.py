@@ -1,64 +1,52 @@
-import os
+"""All config comes from SQLite (set via web dashboard). No .env or runtime_settings.json needed."""
 import json
-from dotenv import load_dotenv
+import sys
+import os
 
-load_dotenv()
+sys.path.insert(0, os.path.dirname(__file__))
+from dashboard.db import get
 
-
-def _load_runtime_settings() -> dict:
-    settings_path = os.getenv("RUNTIME_SETTINGS_FILE", "runtime_settings.json")
+def _int(key, default):
     try:
-        with open(settings_path, "r", encoding="utf-8") as f:
-            return json.load(f)
+        return int(get(key))
     except Exception:
-        return {}
+        return default
 
-
-_runtime = _load_runtime_settings()
+def _json(key):
+    try:
+        return json.loads(get(key))
+    except Exception:
+        return []
 
 # --- Symbols / rotation ---
-SYMBOLS = _runtime.get("symbols", [
-    {
-        "coin_id": os.getenv("COIN_ID", "ripple"),
-        "symbol": os.getenv("COIN_SYMBOL", "XRP/JPY"),
-        "vs_currency": os.getenv("VS_CURRENCY", "jpy"),
-    }
-])
-SYMBOL_ROTATE_SEC = int(os.getenv("SYMBOL_ROTATE_SEC", "300"))
+SYMBOLS         = _json("symbols")
+SYMBOL_ROTATE_SEC = _int("symbol_rotate_sec", 300)
 
 # --- Market data source ---
-# coingecko: CoinGecko API (free, recommended for crypto)
-# binance: Binance REST API (free, real-time, requires API key or public endpoints)
-CHART_SOURCE = os.getenv("CHART_SOURCE", "coingecko").strip().lower()
-BINANCE_API_KEY = os.getenv("BINANCE_API_KEY", "").strip()
+CHART_SOURCE    = get("chart_source") or "coingecko"
 
-# --- TradingView Widget ---
-# Enable TradingView embedded chart for better UX
-USE_TRADINGVIEW_WIDGET = os.getenv("USE_TRADINGVIEW_WIDGET", "true").strip().lower() in ("true", "1", "yes")
-TRADINGVIEW_SYMBOL = os.getenv("TRADINGVIEW_SYMBOL", "CRYPTOCAP:XRP").strip()
+# --- TradingView (kept for compatibility, not used in renderer) ---
+USE_TRADINGVIEW_WIDGET = False
+TRADINGVIEW_SYMBOL     = ""
 
-# --- News sources (rss/scrape) ---
-NEWS_SOURCES = _runtime.get("news_sources", [
-    {"type": "rss", "url": "https://cointelegraph.com/rss/tag/xrp"},
-    {"type": "rss", "url": "https://decrypt.co/feed"},
-])
+# --- News ---
+NEWS_SOURCES    = _json("news_sources")
 
 # --- TTS ---
-TTS_ENGINE = os.getenv("TTS_ENGINE", "edge").strip().lower()
-EDGE_TTS_VOICE = os.getenv("EDGE_TTS_VOICE", "ja-JP-NanamiNeural").strip()
-EDGE_TTS_RATE = os.getenv("EDGE_TTS_RATE", "+0%").strip()
-EDGE_TTS_VOLUME = os.getenv("EDGE_TTS_VOLUME", "+0%").strip()
+TTS_ENGINE      = "edge"
+EDGE_TTS_VOICE  = get("tts_voice")  or "ja-JP-NanamiNeural"
+EDGE_TTS_RATE   = get("tts_rate")   or "+0%"
+EDGE_TTS_VOLUME = get("tts_volume") or "+0%"
 
 # --- Stream ---
-YOUTUBE_RTMP_URL = "rtmp://a.rtmp.youtube.com/live2"
-YOUTUBE_STREAM_KEY = os.getenv("YOUTUBE_STREAM_KEY", "")
+YOUTUBE_RTMP_URL   = "rtmp://a.rtmp.youtube.com/live2"
+YOUTUBE_STREAM_KEY = get("youtube_stream_key")
 
 # --- Video ---
-# 配信の解像度とFPSは固定値にする
-WIDTH = 1280
+WIDTH  = 1280
 HEIGHT = 720
-FPS = 24
+FPS    = 24
 
-# --- Timing (seconds) ---
-CHART_REFRESH_SEC = int(os.getenv("CHART_REFRESH_SEC", "60"))
-NEWS_INTERVAL_SEC = int(os.getenv("NEWS_INTERVAL_SEC", "300"))
+# --- Timing ---
+CHART_REFRESH_SEC = _int("chart_refresh_sec", 60)
+NEWS_INTERVAL_SEC = _int("news_interval_sec", 300)

@@ -1,20 +1,19 @@
 """
 Main orchestrator — runs the 24/7 YouTube live stream loop.
+Config is read from SQLite (set via web dashboard at http://localhost:5000).
 """
 import time
 import logging
 import threading
+import importlib
 
-from config import (
-    FPS,
-    CHART_REFRESH_SEC,
-    NEWS_INTERVAL_SEC,
-    SYMBOLS,
-    SYMBOL_ROTATE_SEC,
-    NEWS_SOURCES,
-    CHART_SOURCE,
-    USE_TRADINGVIEW_WIDGET,
-)
+import config as _cfg_module
+
+def _cfg():
+    """Reload config from SQLite so dashboard changes take effect without restart."""
+    importlib.reload(_cfg_module)
+    return _cfg_module
+
 from data.price_fetcher import fetch_ohlcv_by_source, fetch_current_price_by_source
 from data.news_fetcher import fetch_latest_news
 from chart.chart_renderer import render_chart
@@ -46,21 +45,21 @@ _symbol_idx = -1
 
 def _next_symbol() -> dict:
     global _symbol_idx
-    if not SYMBOLS:
+    symbols = _cfg().SYMBOLS
+    if not symbols:
         return {"coin_id": "ripple", "symbol": "XRP/JPY", "vs_currency": "jpy", "binance_symbol": "", "tradingview_symbol": "CRYPTOCAP:XRP"}
-    _symbol_idx = (_symbol_idx + 1) % len(SYMBOLS)
-    selected = SYMBOLS[_symbol_idx]
+    _symbol_idx = (_symbol_idx + 1) % len(symbols)
+    s = symbols[_symbol_idx]
     return {
-        "coin_id": selected.get("coin_id", "ripple"),
-        "symbol": selected.get("symbol", "XRP/JPY"),
-        "vs_currency": selected.get("vs_currency", "jpy"),
-        "binance_symbol": selected.get("binance_symbol", ""),
-        "tradingview_symbol": selected.get("tradingview_symbol", "CRYPTOCAP:XRP"),
+        "coin_id":            s.get("coin_id", "ripple"),
+        "symbol":             s.get("symbol", "XRP/JPY"),
+        "vs_currency":        s.get("vs_currency", "jpy"),
+        "binance_symbol":     s.get("binance_symbol", ""),
+        "tradingview_symbol": s.get("tradingview_symbol", "CRYPTOCAP:XRP"),
     }
 
 
 def _speak(text: str):
-    """Synthesize text and play into the live stream (non-blocking)."""
     global _streamer
     try:
         wav = synthesize(text)
@@ -74,19 +73,20 @@ def _refresh_chart():
     last_rotate = 0.0
     target = _next_symbol()
     while True:
+        cfg = _cfg()
         try:
-            if time.time() - last_rotate >= SYMBOL_ROTATE_SEC:
+            if time.time() - last_rotate >= cfg.SYMBOL_ROTATE_SEC:
                 target = _next_symbol()
                 last_rotate = time.time()
 
             df = fetch_ohlcv_by_source(
-                source=CHART_SOURCE,
+                source=cfg.CHART_SOURCE,
                 coin_id=target["coin_id"],
                 vs_currency=target["vs_currency"],
                 binance_symbol=target.get("binance_symbol", ""),
             )
             price = fetch_current_price_by_source(
-                source=CHART_SOURCE,
+                source=cfg.CHART_SOURCE,
                 coin_id=target["coin_id"],
                 vs_currency=target["vs_currency"],
                 binance_symbol=target.get("binance_symbol", ""),
@@ -95,32 +95,29 @@ def _refresh_chart():
             change_pct = calc_change_pct(df, price)
             narration = build_chart_narration(target["symbol"], df, price)
             _state.update({
-                "chart_img": img,
-                "price": price,
-                "change_pct": change_pct,
-                "symbol": target["symbol"],
-                "coin_id": target["coin_id"],
+                "chart_img": img, "price": price, "change_pct": change_pct,
+                "symbol": target["symbol"], "coin_id": target["coin_id"],
                 "vs_currency": target["vs_currency"],
                 "binance_symbol": target.get("binance_symbol", ""),
                 "tradingview_symbol": target.get("tradingview_symbol", ""),
-                "subtitle": narration,
-                "df": df,
+                "subtitle": narration, "df": df,
             })
             log.info("Chart refreshed. %s Price: %.2f", target["symbol"], price)
         except Exception as e:
             log.error("Chart refresh error: %s", e)
-        time.sleep(CHART_REFRESH_SEC)
+        time.sleep(cfg.CHART_REFRESH_SEC)
 
 
 def _refresh_news():
     while True:
+        cfg = _cfg()
         try:
-            headlines = fetch_latest_news(NEWS_SOURCES)
+            headlines = fetch_latest_news(cfg.NEWS_SOURCES)
             _news_queue.extend(headlines)
             log.info("Fetched %d new headlines", len(headlines))
         except Exception as e:
             log.error("News fetch error: %s", e)
-        time.sleep(NEWS_INTERVAL_SEC)
+        time.sleep(cfg.NEWS_INTERVAL_SEC)
 
 
 def _run_stream():
@@ -129,13 +126,11 @@ def _run_stream():
     _streamer.start()
     log.info("Stream started.")
 
-    frame_interval = 1.0 / FPS
+    cfg = _cfg()
+    frame_interval = 1.0 / cfg.FPS
     last_composed_frame = None
-    last_compose_time = 0
+    last_compose_time = 0.0
     next_frame_time = time.time()
-
-    # Independent timers for speaking — chart analysis every CHART_REFRESH_SEC,
-    # news every NEWS_INTERVAL_SEC. These never block each other.
     last_chart_speak_time = 0.0
     last_news_speak_time = 0.0
 
@@ -147,20 +142,21 @@ def _run_stream():
             _streamer.start()
             next_frame_time = time.time()
 
+        cfg = _cfg()
         now = time.time()
 
-        # --- News speak: consume one queued headline when interval elapsed ---
-        if _news_queue and (now - last_news_speak_time) >= NEWS_INTERVAL_SEC:
+        # News speak
+        if _news_queue and (now - last_news_speak_time) >= cfg.NEWS_INTERVAL_SEC:
             headline = _news_queue.pop(0)
             text = build_news_narration(headline, _state.get("df"), _state.get("price", 0.0))
             _state["subtitle"] = text
             last_news_speak_time = now
-            last_chart_speak_time = now  # reset chart timer so they don't overlap
-            last_compose_time = 0
+            last_chart_speak_time = now
+            last_compose_time = 0.0
             threading.Thread(target=_speak, args=(text,), daemon=True).start()
 
-        # --- Chart analysis speak: when no news is due and chart interval elapsed ---
-        elif (now - last_chart_speak_time) >= CHART_REFRESH_SEC:
+        # Chart analysis speak
+        elif (now - last_chart_speak_time) >= cfg.CHART_REFRESH_SEC:
             df = _state.get("df")
             price = _state.get("price", 0.0)
             symbol = _state.get("symbol", "")
@@ -168,7 +164,7 @@ def _run_stream():
                 text = build_chart_narration(symbol, df, price)
                 _state["subtitle"] = text
                 last_chart_speak_time = now
-                last_compose_time = 0
+                last_compose_time = 0.0
                 threading.Thread(target=_speak, args=(text,), daemon=True).start()
 
         chart_img = _state.get("chart_img")
@@ -201,36 +197,25 @@ def _run_stream():
 def main():
     log.info("Ensuring fonts are cached...")
     ensure_fonts_cached()
-    
+
     log.info("Loading initial data...")
+    cfg = _cfg()
     try:
         target = _next_symbol()
-        df = fetch_ohlcv_by_source(
-            source=CHART_SOURCE,
-            coin_id=target["coin_id"],
-            vs_currency=target["vs_currency"],
-            binance_symbol=target.get("binance_symbol", ""),
-        )
-        price = fetch_current_price_by_source(
-            source=CHART_SOURCE,
-            coin_id=target["coin_id"],
-            vs_currency=target["vs_currency"],
-            binance_symbol=target.get("binance_symbol", ""),
-        )
+        df = fetch_ohlcv_by_source(source=cfg.CHART_SOURCE, coin_id=target["coin_id"],
+                                   vs_currency=target["vs_currency"], binance_symbol=target.get("binance_symbol", ""))
+        price = fetch_current_price_by_source(source=cfg.CHART_SOURCE, coin_id=target["coin_id"],
+                                              vs_currency=target["vs_currency"], binance_symbol=target.get("binance_symbol", ""))
         img = render_chart(df, target["symbol"])
         change_pct = calc_change_pct(df, price)
         narration = build_chart_narration(target["symbol"], df, price)
         _state.update({
-            "chart_img": img,
-            "price": price,
-            "change_pct": change_pct,
-            "symbol": target["symbol"],
-            "coin_id": target["coin_id"],
+            "chart_img": img, "price": price, "change_pct": change_pct,
+            "symbol": target["symbol"], "coin_id": target["coin_id"],
             "vs_currency": target["vs_currency"],
             "binance_symbol": target.get("binance_symbol", ""),
             "tradingview_symbol": target.get("tradingview_symbol", ""),
-            "subtitle": narration,
-            "df": df,
+            "subtitle": narration, "df": df,
         })
     except Exception as e:
         log.error("Initial load failed: %s", e)

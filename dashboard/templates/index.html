@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>配信コントロールパネル</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Segoe UI',sans-serif;background:#0f0f1a;color:#e0e0e0;min-height:100vh;padding:16px}
+h1{color:#fff;font-size:1.4rem;margin-bottom:16px}
+h2{font-size:.8rem;color:#888;margin:20px 0 8px;text-transform:uppercase;letter-spacing:.08em;border-bottom:1px solid #222;padding-bottom:6px}
+.card{background:#1a1a2e;border:1px solid #2a2a45;border-radius:10px;padding:16px;margin-bottom:14px}
+
+/* Stream bar */
+.stream-bar{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.dot{width:11px;height:11px;border-radius:50%;background:#444;flex-shrink:0;transition:.3s}
+.dot.live{background:#22c55e;box-shadow:0 0 8px #22c55e}
+.status-text{font-size:.88rem;color:#aaa;flex:1;min-width:80px}
+.btn{padding:9px 22px;border:none;border-radius:6px;font-size:.9rem;cursor:pointer;font-weight:600;transition:.15s;white-space:nowrap}
+.btn-start{background:#22c55e;color:#000}
+.btn-start:hover:not(:disabled){background:#16a34a}
+.btn-stop{background:#ef4444;color:#fff}
+.btn-stop:hover:not(:disabled){background:#b91c1c}
+.btn:disabled{opacity:.4;cursor:not-allowed}
+
+/* Save bar — sticky at top */
+.save-bar{position:sticky;top:0;z-index:100;background:#0f0f1a;padding:10px 0;margin-bottom:4px;display:flex;align-items:center;gap:12px}
+.save-btn{background:#6366f1;color:#fff;padding:10px 28px;border:none;border-radius:7px;font-size:.95rem;font-weight:700;cursor:pointer;transition:.15s}
+.save-btn:hover{background:#4f46e5}
+.save-hint{font-size:.78rem;color:#555}
+
+label{display:block;font-size:.78rem;color:#888;margin-bottom:3px;margin-top:10px}
+input,select{width:100%;padding:8px 10px;background:#0f0f1a;border:1px solid #2d2d4a;border-radius:6px;color:#e0e0e0;font-size:.88rem}
+input:focus,select:focus{outline:none;border-color:#6366f1}
+
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px}
+@media(max-width:640px){
+  .grid2,.grid3{grid-template-columns:1fr}
+  .stream-bar{gap:8px}
+}
+
+.row-box{border:1px solid #252540;border-radius:8px;padding:12px;margin-bottom:8px;position:relative;padding-right:36px}
+.remove-btn{position:absolute;top:10px;right:10px;background:none;border:none;color:#555;font-size:1rem;cursor:pointer;padding:2px 6px;line-height:1}
+.remove-btn:hover{color:#ef4444}
+.add-btn{background:transparent;color:#666;border:1px dashed #333;width:100%;padding:8px;border-radius:6px;cursor:pointer;margin-top:4px;font-size:.85rem;transition:.15s}
+.add-btn:hover{border-color:#6366f1;color:#a5b4fc}
+</style>
+</head>
+<body>
+<h1>🎙️ 配信コントロールパネル</h1>
+
+<!-- Stream control card -->
+<div class="card">
+  <div class="stream-bar">
+    <div class="dot {% if running %}live{% endif %}" id="dot"></div>
+    <span class="status-text" id="status-text">{% if running %}配信中 (LIVE){% else %}停止中{% endif %}</span>
+    <button class="btn btn-start" id="btn-start" onclick="startStream()" {% if running %}disabled{% endif %}>▶ 配信開始</button>
+    <button class="btn btn-stop"  id="btn-stop"  onclick="stopStream()"  {% if not running %}disabled{% endif %}>■ 配信停止</button>
+  </div>
+</div>
+
+<form method="POST" action="/save" id="cfg-form">
+
+<!-- Sticky save bar -->
+<div class="save-bar">
+  <button type="submit" class="save-btn">💾 設定を保存</button>
+  <span class="save-hint">設定変更後は必ず保存してください</span>
+</div>
+
+<!-- YouTube -->
+<div class="card">
+  <h2>YouTube 配信設定</h2>
+  <label>ストリームキー（YouTube Studio から取得）</label>
+  <div style="position:relative">
+    <input type="password" name="youtube_stream_key" id="stream-key" value="{{ cfg.youtube_stream_key }}" placeholder="xxxx-xxxx-xxxx-xxxx" style="padding-right:40px">
+    <button type="button" onclick="toggleKey()" id="eye-btn" style="position:absolute;right:0;top:0;height:100%;width:38px;background:none;border:none;cursor:pointer;color:#666;font-size:1rem">👁</button>
+  </div>
+  <label>データソース</label>
+  <select name="chart_source">
+    <option value="coingecko" {% if cfg.chart_source=='coingecko' %}selected{% endif %}>CoinGecko（推奨・無料）</option>
+    <option value="binance"   {% if cfg.chart_source=='binance'   %}selected{% endif %}>Binance</option>
+  </select>
+</div>
+
+<!-- Timing -->
+<div class="card">
+  <h2>更新間隔</h2>
+  <div class="grid3">
+    <div>
+      <label>チャート更新（秒）</label>
+      <input type="number" name="chart_refresh_sec" value="{{ cfg.chart_refresh_sec }}" min="10">
+    </div>
+    <div>
+      <label>ニュース読み上げ間隔（秒）</label>
+      <input type="number" name="news_interval_sec" value="{{ cfg.news_interval_sec }}" min="30">
+    </div>
+    <div>
+      <label>銘柄切り替え間隔（秒）</label>
+      <input type="number" name="symbol_rotate_sec" value="{{ cfg.symbol_rotate_sec }}" min="30">
+    </div>
+  </div>
+</div>
+
+<!-- TTS -->
+<div class="card">
+  <h2>音声読み上げ設定</h2>
+  <div class="grid3">
+    <div>
+      <label>音声</label>
+      <select name="tts_voice">
+        <option value="ja-JP-NanamiNeural" {% if cfg.tts_voice=='ja-JP-NanamiNeural' %}selected{% endif %}>Nanami（女性）</option>
+        <option value="ja-JP-KeitaNeural"  {% if cfg.tts_voice=='ja-JP-KeitaNeural'  %}selected{% endif %}>Keita（男性）</option>
+      </select>
+    </div>
+    <div>
+      <label>速度（例: +10%, -5%）</label>
+      <input type="text" name="tts_rate" value="{{ cfg.tts_rate }}">
+    </div>
+    <div>
+      <label>音量（例: +0%, +20%）</label>
+      <input type="text" name="tts_volume" value="{{ cfg.tts_volume }}">
+    </div>
+  </div>
+</div>
+
+<!-- Symbols -->
+<div class="card">
+  <h2>銘柄リスト</h2>
+  <div id="symbols-container">
+    {% for s in symbols %}
+    <div class="row-box" id="sym-row-{{ loop.index0 }}">
+      <button type="button" class="remove-btn" onclick="removeRow('sym-row-{{ loop.index0 }}')">✕</button>
+      <div class="grid2">
+        <div>
+          <label>CoinGecko ID（例: ripple）</label>
+          <input type="text" name="sym_coin_id_{{ loop.index0 }}" value="{{ s.coin_id }}">
+        </div>
+        <div>
+          <label>表示名（例: XRP/JPY）</label>
+          <input type="text" name="sym_symbol_{{ loop.index0 }}" value="{{ s.symbol }}">
+        </div>
+        <div>
+          <label>通貨ペア（jpy / usd）</label>
+          <input type="text" name="sym_vs_{{ loop.index0 }}" value="{{ s.vs_currency }}">
+        </div>
+        <div>
+          <label>Binanceシンボル（任意）</label>
+          <input type="text" name="sym_binance_{{ loop.index0 }}" value="{{ s.binance_symbol }}">
+        </div>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  <button type="button" class="add-btn" onclick="addSymbol()">＋ 銘柄を追加</button>
+</div>
+
+<!-- News Sources -->
+<div class="card">
+  <h2>ニュースソース</h2>
+  <div id="news-container">
+    {% for n in news_sources %}
+    <div class="row-box" id="news-row-{{ loop.index0 }}">
+      <button type="button" class="remove-btn" onclick="removeRow('news-row-{{ loop.index0 }}')">✕</button>
+      <div class="grid2">
+        <div>
+          <label>タイプ</label>
+          <select name="news_type_{{ loop.index0 }}">
+            <option value="rss"    {% if n.type=='rss'    %}selected{% endif %}>RSS</option>
+            <option value="scrape" {% if n.type=='scrape' %}selected{% endif %}>スクレイプ</option>
+          </select>
+        </div>
+        <div>
+          <label>URL</label>
+          <input type="text" name="news_url_{{ loop.index0 }}" value="{{ n.url }}">
+        </div>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  <button type="button" class="add-btn" onclick="addNews()">＋ ニュースソースを追加</button>
+</div>
+
+</form>
+
+<script>
+let symCount = {{ symbols|length }};
+let newsCount = {{ news_sources|length }};
+
+function removeRow(id){const el=document.getElementById(id);if(el)el.remove()}
+
+function addSymbol(){
+  const i=symCount++;
+  document.getElementById('symbols-container').insertAdjacentHTML('beforeend',`
+    <div class="row-box" id="sym-row-${i}">
+      <button type="button" class="remove-btn" onclick="removeRow('sym-row-${i}')">✕</button>
+      <div class="grid2">
+        <div><label>CoinGecko ID</label><input type="text" name="sym_coin_id_${i}" placeholder="ripple"></div>
+        <div><label>表示名</label><input type="text" name="sym_symbol_${i}" placeholder="XRP/JPY"></div>
+        <div><label>通貨ペア</label><input type="text" name="sym_vs_${i}" value="jpy"></div>
+        <div><label>Binanceシンボル（任意）</label><input type="text" name="sym_binance_${i}"></div>
+      </div>
+    </div>`);
+}
+
+function addNews(){
+  const j=newsCount++;
+  document.getElementById('news-container').insertAdjacentHTML('beforeend',`
+    <div class="row-box" id="news-row-${j}">
+      <button type="button" class="remove-btn" onclick="removeRow('news-row-${j}')">✕</button>
+      <div class="grid2">
+        <div><label>タイプ</label>
+          <select name="news_type_${j}">
+            <option value="rss">RSS</option>
+            <option value="scrape">スクレイプ</option>
+          </select>
+        </div>
+        <div><label>URL</label><input type="text" name="news_url_${j}" placeholder="https://..."></div>
+      </div>
+    </div>`);
+}
+
+function toggleKey(){
+  const f=document.getElementById('stream-key');
+  const b=document.getElementById('eye-btn');
+  if(f.type==='password'){f.type='text';b.textContent='🙈'}
+  else{f.type='password';b.textContent='👁'}
+}
+
+
+  document.getElementById('btn-start').disabled=true;
+  const r=await fetch('/stream/start',{method:'POST'});
+  const d=await r.json();
+  if(d.status==='started'||d.status==='already_running')setLive(true);
+  else document.getElementById('btn-start').disabled=false;
+}
+
+async function stopStream(){
+  document.getElementById('btn-stop').disabled=true;
+  await fetch('/stream/stop',{method:'POST'});
+  setLive(false);
+}
+
+function setLive(live){
+  document.getElementById('dot').className='dot'+(live?' live':'');
+  document.getElementById('status-text').textContent=live?'配信中 (LIVE)':'停止中';
+  document.getElementById('btn-start').disabled=live;
+  document.getElementById('btn-stop').disabled=!live;
+}
+
+setInterval(async()=>{
+  const r=await fetch('/stream/status');
+  const d=await r.json();
+  setLive(d.running);
+},5000);
+</script>
+</body>
+</html>
