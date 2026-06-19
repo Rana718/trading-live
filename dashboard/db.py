@@ -14,6 +14,7 @@ _DEFAULTS = {
     "tts_voice": "ja-JP-NanamiNeural",
     "tts_rate": "+0%",
     "tts_volume": "+0%",
+    "video_quality": "720p",
     "symbols": json.dumps([
         {"coin_id": "ripple",  "symbol": "XRP/JPY", "vs_currency": "jpy", "binance_symbol": "", "tradingview_symbol": "CRYPTOCAP:XRP"},
         {"coin_id": "bitcoin", "symbol": "BTC/JPY", "vs_currency": "jpy", "binance_symbol": "", "tradingview_symbol": "CRYPTOCAP:BTC"},

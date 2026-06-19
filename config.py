@@ -42,10 +42,18 @@ EDGE_TTS_VOLUME = get("tts_volume") or "+0%"
 YOUTUBE_RTMP_URL   = "rtmp://a.rtmp.youtube.com/live2"
 YOUTUBE_STREAM_KEY = get("youtube_stream_key")
 
-# --- Video ---
-WIDTH  = 1280
-HEIGHT = 720
-FPS    = 24
+# --- Video quality presets ---
+_QUALITY_PRESETS = {
+    "1080p": {"width": 1920, "height": 1080, "fps": 30, "bitrate": "4500k"},
+    "720p":  {"width": 1280, "height":  720, "fps": 24, "bitrate": "2500k"},
+    "480p":  {"width":  854, "height":  480, "fps": 24, "bitrate": "1000k"},
+    "360p":  {"width":  640, "height":  360, "fps": 15, "bitrate":  "500k"},
+}
+_q = _QUALITY_PRESETS.get(get("video_quality") or "720p", _QUALITY_PRESETS["720p"])
+WIDTH   = _q["width"]
+HEIGHT  = _q["height"]
+FPS     = _q["fps"]
+VIDEO_BITRATE = _q["bitrate"]
 
 # --- Timing ---
 CHART_REFRESH_SEC = _int("chart_refresh_sec", 60)

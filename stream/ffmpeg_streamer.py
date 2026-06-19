@@ -7,7 +7,7 @@ import queue
 import time
 import numpy as np
 from PIL import Image
-from config import WIDTH, HEIGHT, FPS, YOUTUBE_RTMP_URL, YOUTUBE_STREAM_KEY
+from config import WIDTH, HEIGHT, FPS, YOUTUBE_RTMP_URL, YOUTUBE_STREAM_KEY, VIDEO_BITRATE
 
 MUSIC_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "music.mp3")
 MUSIC_VOLUME = 0.50  # background music volume
@@ -137,7 +137,8 @@ class FFmpegStreamer:
                 # encode
                 "-vcodec", "libx264", "-preset", "veryfast", "-tune", "zerolatency",
                 "-pix_fmt", "yuv420p", "-g", str(FPS * 2),
-                "-b:v", "2500k", "-minrate", "2500k", "-maxrate", "2500k", "-bufsize", "5000k",
+                "-b:v", VIDEO_BITRATE, "-minrate", VIDEO_BITRATE, "-maxrate", VIDEO_BITRATE,
+                "-bufsize", str(int(VIDEO_BITRATE.replace("k","")) * 2) + "k",
                 "-x264-params", f"nal-hrd=cbr:force-cfr=1:keyint={FPS * 2}:min-keyint={FPS * 2}:scenecut=0",
                 "-acodec", "aac", "-ar", "44100", "-b:a", "128k",
                 "-f", "flv", rtmp_target,

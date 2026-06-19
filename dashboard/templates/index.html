@@ -81,6 +81,13 @@ input:focus,select:focus{outline:none;border-color:#6366f1}
     <option value="coingecko" {% if cfg.chart_source=='coingecko' %}selected{% endif %}>CoinGecko（推奨・無料）</option>
     <option value="binance"   {% if cfg.chart_source=='binance'   %}selected{% endif %}>Binance</option>
   </select>
+  <label>映像クオリティ</label>
+  <select name="video_quality">
+    <option value="1080p" {% if cfg.video_quality=='1080p' %}selected{% endif %}>1080p — 高画質 (4500kbps, 30fps) ※高負荷</option>
+    <option value="720p"  {% if cfg.video_quality=='720p' or not cfg.video_quality %}selected{% endif %}>720p — 標準 (2500kbps, 24fps) 推奨</option>
+    <option value="480p"  {% if cfg.video_quality=='480p' %}selected{% endif %}>480p — 低画質 (1000kbps, 24fps)</option>
+    <option value="360p"  {% if cfg.video_quality=='360p' %}selected{% endif %}>360p — 最低画質 (500kbps, 15fps) ※低スペック向け</option>
+  </select>
 </div>
 
 <!-- Timing -->

@@ -67,6 +67,7 @@ def save():
     set_many({
         "youtube_stream_key": f.get("youtube_stream_key", ""),
         "chart_source":       f.get("chart_source", "coingecko"),
+        "video_quality":      f.get("video_quality", "720p"),
         "chart_refresh_sec":  f.get("chart_refresh_sec", "60"),
         "news_interval_sec":  f.get("news_interval_sec", "300"),
         "symbol_rotate_sec":  f.get("symbol_rotate_sec", "300"),
