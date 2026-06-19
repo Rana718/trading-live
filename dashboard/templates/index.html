@@ -227,7 +227,7 @@ function toggleKey(){
   else{f.type='password';b.textContent='👁'}
 }
 
-
+async function startStream(){
   document.getElementById('btn-start').disabled=true;
   const r=await fetch('/stream/start',{method:'POST'});
   const d=await r.json();
