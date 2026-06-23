@@ -11,7 +11,7 @@ from config import WIDTH, HEIGHT, FPS, YOUTUBE_RTMP_URL, YOUTUBE_STREAM_KEY, VID
 MUSIC_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "music.mp3")
 MUSIC_VOLUME = 0.45
 _SAMPLE_RATE = 44100
-_CHUNK = _SAMPLE_RATE // 10 * 2  # 0.1s mono s16le
+_CHUNK = _SAMPLE_RATE // 10 * 2  # 0.1s mono s16le = 8820 bytes
 _IS_WINDOWS = platform.system().lower() == "windows"
 
 
@@ -45,7 +45,7 @@ class _MusicReader:
                 print(f"[Music] Decode error: {result.stderr.decode()[:200]}")
                 return
             self._pcm = result.stdout
-            print(f"[Music] Loaded {len(self._pcm) // 1024}KB PCM, duration ~{len(self._pcm) / (_SAMPLE_RATE * 2):.1f}s")
+            print(f"[Music] Loaded {len(self._pcm) // 1024}KB PCM, ~{len(self._pcm) / (_SAMPLE_RATE * 2):.0f}s")
         except Exception as e:
             print(f"[Music] Failed to load: {e}")
 
@@ -58,7 +58,6 @@ class _MusicReader:
                 out = self._pcm[self._pos:end]
                 self._pos = end
             else:
-                # Wrap around seamlessly
                 out = self._pcm[self._pos:]
                 remaining = size - len(out)
                 self._pos = remaining % len(self._pcm)
@@ -66,10 +65,30 @@ class _MusicReader:
             return out
 
     def stop(self):
-        pass  # nothing to clean up
+        pass
 
 
 class FFmpegStreamer:
+    """
+    Cross-platform streamer.
+    - Linux: os.pipe() + pass_fds to give FFmpeg a second input pipe for audio.
+    - Windows: Two FFmpeg processes piped together. Audio FFmpeg encodes PCM->AAC
+      and feeds its stdout into main FFmpeg as a secondary input via stdin chaining.
+
+    On Windows we use a simpler approach: single FFmpeg process that reads BOTH
+    video and audio interleaved via a nut container from a muxer subprocess.
+    
+    Actually simplest: on Windows we use a single FFmpeg with video on stdin and
+    audio via a helper subprocess connected by Python threading (audio_proc.stdout
+    is read by the main process indirectly).
+    
+    FINAL APPROACH (works everywhere):
+    - Single FFmpeg process
+    - Video: rawvideo on stdin (pipe:0)
+    - Audio: on Linux use pipe:N via pass_fds; on Windows use a local TCP connection
+      (FFmpeg supports tcp:// as input)
+    """
+
     def __init__(self):
         self._proc: subprocess.Popen | None = None
         self._voice_queue: queue.Queue[bytes] = queue.Queue(maxsize=10)
@@ -77,7 +96,9 @@ class FFmpegStreamer:
         self._mixer_thread: threading.Thread | None = None
         self._log_thread: threading.Thread | None = None
         self._music = _MusicReader()
-        self._audio_w: int | None = None
+        self._audio_w = None  # write end fd (Linux) or socket (Windows)
+        self._tcp_server = None  # Windows only
+        self._tcp_conn = None  # Windows only
 
     def start(self):
         self._music.start()
@@ -88,20 +109,20 @@ class FFmpegStreamer:
         audio_bitrate = "128k" if bitrate_k >= 2000 else "96k" if bitrate_k >= 800 else "64k"
         rtmp_target = f"{YOUTUBE_RTMP_URL}/{YOUTUBE_STREAM_KEY}"
 
-        audio_r, self._audio_w = os.pipe()
-
-        popen_kwargs: dict = dict(
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            bufsize=0,
-        )
         if _IS_WINDOWS:
-            # Windows: close_fds=False lets child inherit all open fds
-            popen_kwargs["close_fds"] = False
+            self._start_windows(x264_preset, audio_bitrate, bitrate_k, rtmp_target)
         else:
-            # Linux/macOS: must explicitly whitelist fd via pass_fds
-            popen_kwargs["pass_fds"] = (audio_r,)
+            self._start_linux(x264_preset, audio_bitrate, bitrate_k, rtmp_target)
+
+        self._mixer_thread = threading.Thread(target=self._mixer_loop, daemon=True)
+        self._mixer_thread.start()
+
+        self._log_thread = threading.Thread(target=self._read_logs, daemon=True)
+        self._log_thread.start()
+
+    def _start_linux(self, x264_preset, audio_bitrate, bitrate_k, rtmp_target):
+        audio_r, audio_w = os.pipe()
+        self._audio_w = audio_w
 
         self._proc = subprocess.Popen(
             [
@@ -118,24 +139,65 @@ class FFmpegStreamer:
                 "-acodec", "aac", "-ar", str(_SAMPLE_RATE), "-b:a", audio_bitrate,
                 "-f", "flv", rtmp_target,
             ],
-            **popen_kwargs,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            bufsize=0,
+            pass_fds=(audio_r,),
         )
-
-        # Close read end in parent — FFmpeg owns it now
         os.close(audio_r)
 
-        self._mixer_thread = threading.Thread(target=self._mixer_loop, daemon=True)
-        self._mixer_thread.start()
+    def _start_windows(self, x264_preset, audio_bitrate, bitrate_k, rtmp_target):
+        """On Windows, use a local TCP socket for audio input to FFmpeg."""
+        import socket
 
-        self._log_thread = threading.Thread(target=self._read_logs, daemon=True)
-        self._log_thread.start()
+        # Start a TCP server on a random port
+        self._tcp_server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self._tcp_server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        self._tcp_server.bind(("127.0.0.1", 0))
+        port = self._tcp_server.getsockname()[1]
+        self._tcp_server.listen(1)
+
+        # FFmpeg will connect to this TCP server to read audio
+        audio_input = f"tcp://127.0.0.1:{port}?listen=0"
+
+        self._proc = subprocess.Popen(
+            [
+                "ffmpeg", "-y", "-loglevel", "warning",
+                "-f", "rawvideo", "-vcodec", "rawvideo",
+                "-s", f"{WIDTH}x{HEIGHT}", "-pix_fmt", "rgb24",
+                "-r", str(FPS), "-i", "pipe:0",
+                "-f", "s16le", "-ar", str(_SAMPLE_RATE), "-ac", "1",
+                "-i", audio_input,
+                "-vcodec", "libx264", "-preset", x264_preset, "-tune", "zerolatency",
+                "-pix_fmt", "yuv420p", "-g", str(FPS * 2),
+                "-b:v", VIDEO_BITRATE, "-maxrate", VIDEO_BITRATE,
+                "-bufsize", str(bitrate_k * 2) + "k",
+                "-acodec", "aac", "-ar", str(_SAMPLE_RATE), "-b:a", audio_bitrate,
+                "-f", "flv", rtmp_target,
+            ],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            bufsize=0,
+        )
+
+        # Accept FFmpeg's connection
+        self._tcp_server.settimeout(10)
+        self._tcp_conn, _ = self._tcp_server.accept()
+        self._tcp_conn.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
 
     def _mixer_loop(self):
         silence = b"\x00" * _CHUNK
         chunk_duration = (_CHUNK // 2) / _SAMPLE_RATE
 
-        audio_wfile = os.fdopen(self._audio_w, "wb", buffering=0)
-        self._audio_w = None
+        if _IS_WINDOWS:
+            write_fn = self._write_tcp
+        else:
+            audio_wfile = os.fdopen(self._audio_w, "wb", buffering=0)
+            self._audio_w = None
+            write_fn = audio_wfile.write
+
         next_tick = time.monotonic()
         try:
             while not self._mixer_stop.is_set():
@@ -150,7 +212,7 @@ class FFmpegStreamer:
                         v = v + b"\x00" * (_CHUNK - len(v))
                     m = self._music.read(_CHUNK)
                     try:
-                        audio_wfile.write(_mix_pcm(m, v))
+                        write_fn(_mix_pcm(m, v))
                     except (BrokenPipeError, OSError):
                         return
                     next_tick += chunk_duration
@@ -158,10 +220,15 @@ class FFmpegStreamer:
                     if sleep > 0:
                         time.sleep(sleep)
         finally:
-            try:
-                audio_wfile.close()
-            except Exception:
-                pass
+            if not _IS_WINDOWS:
+                try:
+                    audio_wfile.close()
+                except Exception:
+                    pass
+
+    def _write_tcp(self, data: bytes):
+        if self._tcp_conn:
+            self._tcp_conn.sendall(data)
 
     def _read_logs(self):
         if not self._proc or not self._proc.stdout:
@@ -223,6 +290,18 @@ class FFmpegStreamer:
             except Exception:
                 pass
             self._audio_w = None
+        if self._tcp_conn:
+            try:
+                self._tcp_conn.close()
+            except Exception:
+                pass
+            self._tcp_conn = None
+        if self._tcp_server:
+            try:
+                self._tcp_server.close()
+            except Exception:
+                pass
+            self._tcp_server = None
         if self._proc:
             try:
                 self._proc.stdin.close()
