@@ -147,7 +147,7 @@ class FFmpegStreamer:
         os.close(audio_r)
 
     def _start_windows(self, x264_preset, audio_bitrate, bitrate_k, rtmp_target):
-        """On Windows, use local TCP for audio: FFmpeg listens, Python connects."""
+        """On Windows, use local TCP for audio: audio input listed FIRST so FFmpeg listens immediately."""
         import socket
 
         # Find a free port
@@ -156,18 +156,25 @@ class FFmpegStreamer:
         port = sock.getsockname()[1]
         sock.close()
 
-        # FFmpeg listens on that port for audio input
+        # Audio input FIRST (index 0) with listen=1, video SECOND (index 1) via stdin
+        # This makes FFmpeg open the TCP listener before trying to read video
         audio_input = f"tcp://127.0.0.1:{port}?listen=1"
 
         self._proc = subprocess.Popen(
             [
                 "ffmpeg", "-y", "-loglevel", "warning",
+                # audio first — FFmpeg listens on TCP immediately
+                "-f", "s16le", "-ar", str(_SAMPLE_RATE), "-ac", "1",
+                "-thread_queue_size", "1024",
+                "-i", audio_input,
+                # video second via stdin
                 "-f", "rawvideo", "-vcodec", "rawvideo",
                 "-s", f"{WIDTH}x{HEIGHT}", "-pix_fmt", "rgb24",
-                "-r", str(FPS), "-i", "pipe:0",
-                "-f", "s16le", "-ar", str(_SAMPLE_RATE), "-ac", "1",
                 "-thread_queue_size", "512",
-                "-i", audio_input,
+                "-r", str(FPS), "-i", "pipe:0",
+                # map: video from input 1, audio from input 0
+                "-map", "1:v", "-map", "0:a",
+                # encode
                 "-vcodec", "libx264", "-preset", x264_preset, "-tune", "zerolatency",
                 "-pix_fmt", "yuv420p", "-g", str(FPS * 2),
                 "-b:v", VIDEO_BITRATE, "-maxrate", VIDEO_BITRATE,
@@ -181,16 +188,14 @@ class FFmpegStreamer:
             bufsize=0,
         )
 
-        # Give FFmpeg a moment to start listening
-        time.sleep(1)
-
-        # Python connects to FFmpeg's TCP listener
+        # Connect to FFmpeg's TCP listener (retry for up to 15s)
         self._tcp_conn = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        for attempt in range(20):
+        for attempt in range(30):
             try:
                 self._tcp_conn.connect(("127.0.0.1", port))
+                print(f"[Audio] Connected to FFmpeg TCP audio on port {port}")
                 break
-            except ConnectionRefusedError:
+            except (ConnectionRefusedError, OSError):
                 time.sleep(0.5)
         else:
             print("[Audio] Failed to connect to FFmpeg TCP audio input")
